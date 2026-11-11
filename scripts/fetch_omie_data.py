@@ -56,6 +56,20 @@ ORDEM_RISCO = ["Perda provável", "Risco parcial", "Sem giro", "Vende a tempo"]
 # diretoria; até lá ficam de fora do data.json.
 INCLUIR_DADOS_SENSIVEIS = False
 
+# Revalidações confirmadas pela Parker (certificado em PDF enviado pela
+# Qualidade): lote -> nova validade. O Omie continua com a validade antiga, então
+# sem esta tabela o lote some do painel como "vencido". Vale para o lote direto e,
+# nas bisnagas, para o lote de matéria-prima citado nas observações da OP.
+# Acrescente uma linha a cada certificado novo; linhas vencidas podem ficar.
+REVALIDACOES = {
+    "26010048": "13/11/2026",  # LORD ADESIVO 406 - KG, certificado de 23/09/2026
+    "26010193": "18/11/2026",  # LORD ADESIVO 406 - KG, certificado de 23/09/2026
+}
+
+# Lotes vencidos há até este número de dias ainda são conferidos contra as
+# revalidações (revalidação da Parker costuma estender de 30 a 90 dias).
+JANELA_REVALIDACAO_DIAS = 180
+
 
 def omie_call(path: str, call: str, param: dict) -> dict:
     """Chamada genérica à API do Omie, com retry simples em erro de rede/5xx."""
@@ -441,12 +455,47 @@ def enriquecer_com_op(lotes: list) -> None:
     print(f"OPs: {com_op} lote(s) de produção identificados, {sem_mp} sem lote de matéria-prima nas observações.")
 
 
-def montar_dashboard():
-    # Lotes vencidos ficam fora do painel: são tratados pela operação no e-mail
-    # interno de vencidos, não pelo comercial.
-    lotes = [l for l in buscar_lotes() if not l["vencido"]]
+def aplicar_revalidacoes(lotes: list) -> None:
+    """
+    Troca a validade do Omie pela validade revalidada quando ela é posterior.
+    Lote direto: usa REVALIDACOES[lote]. Bisnaga (lote = OP): a validade da
+    bisnaga é a menor entre as dos seus insumos; se ela vinha de um insumo
+    revalidado, passa a ser a menor entre as validades atualizadas dos insumos.
+    """
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    revalidados = []
+    for lote in lotes:
+        original = parse_data_omie(lote["validade"])
+        if original is None:
+            continue
+        nova = None
+        mp = lote.get("lotes_mp") or []
+        if not lote.get("op") and lote["lote"] in REVALIDACOES:
+            nova = parse_data_omie(REVALIDACOES[lote["lote"]])
+        elif mp and any(m["lote"] in REVALIDACOES for m in mp):
+            vals = [parse_data_omie(m["validade"]) for m in mp]
+            if all(vals) and original == min(vals):
+                novas = [parse_data_omie(REVALIDACOES.get(m["lote"], "")) or v for m, v in zip(mp, vals)]
+                nova = min(novas)
+        if nova and nova > original:
+            lote["validade_original"] = lote["validade"]
+            lote["validade"] = nova.strftime("%d/%m/%Y")
+            lote["revalidado"] = True
+            lote["dias_restantes"] = (nova - hoje).days
+            lote["vencido"] = lote["dias_restantes"] < 0
+            revalidados.append(f'{lote["lote"]} ({lote["validade_original"]} -> {lote["validade"]})')
+    if revalidados:
+        print(f"Revalidações aplicadas: {', '.join(revalidados)}")
 
+
+def montar_dashboard():
+    # Vencidos recentes entram na conferência porque podem ter sido revalidados
+    # pela Parker; os que continuam vencidos ficam fora do painel (são tratados
+    # pela operação no e-mail interno de vencidos, não pelo comercial).
+    lotes = [l for l in buscar_lotes() if l["dias_restantes"] >= -JANELA_REVALIDACAO_DIAS]
     enriquecer_com_op(lotes)
+    aplicar_revalidacoes(lotes)
+    lotes = [l for l in lotes if not l["vencido"] and l["dias_restantes"] <= JANELA_DIAS]
 
     for lote in lotes:
         lote["familia"], lote["unidade"] = buscar_produto(lote["n_cod_produto"])
@@ -550,6 +599,8 @@ def montar_dashboard():
                 "lotes_mp": l.get("lotes_mp", []),
                 "fabricacao": l["fabricacao"],
                 "validade": l["validade"],
+                "validade_original": l.get("validade_original"),
+                "revalidado": l.get("revalidado", False),
                 "dias_restantes": l["dias_restantes"],
                 "situacao": l["urgencia"],
                 "saldo": l["saldo"],
