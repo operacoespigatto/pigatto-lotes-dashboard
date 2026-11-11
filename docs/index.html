@@ -112,6 +112,7 @@
   tr.selecionado td:first-child { box-shadow: inset 4px 0 0 var(--orange); }
   .op { display: block; font-weight: 600; white-space: nowrap; }
   .mp { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.45; white-space: nowrap; }
+  .reval { display: block; font-size: 11.5px; color: var(--green); font-weight: 600; white-space: nowrap; }
   .dias-urg { color: var(--red); font-weight: 700; }
   .dias-med { color: var(--amber); font-weight: 700; }
   .total td { font-weight: 700; background: #EEF4FA !important; }
@@ -274,7 +275,7 @@
           <tbody id="tabelaLotesBody"></tbody>
         </table>
       </div>
-      <p class="nota">Projeção pelo ritmo médio de vendas faturadas dos últimos 12 meses, supondo que o lote que vence antes sai antes. "Dias p/ vender" é quanto tempo o ritmo atual leva para consumir o saldo do lote (e dos que vencem antes dele). "Saldo em risco" é o que deve sobrar na data de validade, na unidade do produto. Não considera sazonalidade nem pedidos pontuais.</p>
+      <p class="nota">Projeção pelo ritmo médio de vendas faturadas dos últimos 12 meses, supondo que o lote que vence antes sai antes. "Dias p/ vender" é quanto tempo o ritmo atual leva para consumir o saldo do lote (e dos que vencem antes dele). "Saldo em risco" é o que deve sobrar na data de validade, na unidade do produto. Não considera sazonalidade nem pedidos pontuais. Lotes revalidados pela Parker usam a nova validade (a original aparece embaixo); nas bisnagas, a validade é a menor entre a dos insumos da OP.</p>
     </section>
 
     <footer>
@@ -458,7 +459,7 @@ function renderTabela() {
     <tr class="clicavel${l.cod === produtoSelecionado ? " selecionado" : ""}" data-cod="${esc(l.cod)}">
       <td class="produto">${esc(l.produto)}</td>
       <td>${celulaLote(l)}</td>
-      <td>${esc(l.validade)}</td>
+      <td>${esc(l.validade)}${l.revalidado ? `<span class="reval" title="Revalidado pela Parker. Validade original no Omie: ${esc(l.validade_original)}">revalidado · era ${esc(l.validade_original)}</span>` : ""}</td>
       <td class="num ${dias}">${l.dias_restantes}</td>
       <td class="num">${formatarNumero(l.saldo)} ${esc(l.unidade)}</td>
       <td class="num col-dv">${l.dias_para_vender ?? "—"}</td>
